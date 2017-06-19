@@ -1,0 +1,7 @@
+*.exe
+*.obj
+*.o
+*.a
+.DS_Store
+node_modules
+gtin
