@@ -4,6 +4,13 @@
 module gtin;
 import std.ascii : isDigit;
 import std.traits : isIntegral, isUnsigned;
+// TODO: gs1Prefix()
+// TODO: Create countries library to identify prefixes
+// TODO: Create ISBN library for "bookland" constructor
+// TODO: Create ISSN for Serial Publications constructor
+// TODO: Create a UPC library for GTIN-12 constructor
+// TODO: opEquals will have to be implemented for each class.
+// TODO: opCmp will have to be implemented for each class.
 
 version(unittest)
 {
@@ -45,6 +52,21 @@ class GlobalTradeItemNumber
 
     private ubyte[] _digits;
 
+    public nothrow @property
+    ubyte[] digits()
+    {
+        return this._digits;
+    }
+
+    /**
+        Casts the GTIN as a string.
+    */
+    public nothrow
+    string opCast(string)()
+    {
+        return this.toString();
+    }
+
     public override
     string toString()
     out (result)
@@ -64,6 +86,33 @@ class GlobalTradeItemNumber
         return result;
     }
 
+    // REVIEW: Mainly, I want to know that this line is secure.
+    /**
+        An override so that associative arrays can use a GTIN as a key.
+        Returns: A size_t that represents a hash of the GTIN.
+    */
+    public override nothrow @trusted 
+    size_t toHash() const
+    {
+        size_t result = 0;
+        foreach (digit; this._digits)
+        {
+            result += typeid(digit).getHash(cast(const void*)&digit);
+        }
+        return result;
+    }
+
+    public
+    ulong toNumber()
+    {
+        ulong result;
+        for (int i = this.length-1; i > 0; i--)
+        {
+            result += (this._digits[i] * (10^^(this._digits.length-i)));
+        }
+        return result;
+    }
+
     private @property
     ubyte modulo10CheckSumDigit()
     {
@@ -72,19 +121,78 @@ class GlobalTradeItemNumber
         {
             if ((this._digits.length-i) % 2)
             {
-                debug writeln("x3: " ~ cast(char) (this._digits[i] + 0x30u));
                 sum += (this._digits[i] * 0x03u);
             }
             else
             {
-                debug writeln("x1: " ~ cast(char) (this._digits[i] + 0x30u));
                 sum += this._digits[i];
             }
         }
         uint nearestTen = sum;
         while(nearestTen % 10u) nearestTen++;
-        debug writefln("sum: %d nearestTen: %d", sum, nearestTen);
         return cast(ubyte) (nearestTen - sum);
+    }
+
+    public
+    this (string digits)
+    {
+        if (digits.length > this.length || digits.length < this.length-1)
+            throw new GTINException
+            ("Invalid number of digits provided to GTIN.");
+
+        foreach (digit; digits)
+        {
+            if (!digit.isDigit)
+                throw new GTINException
+                ("Invalid non-digit character provided to constructor.");
+            
+            this._digits ~= cast(ubyte) (digit - 0x30);
+        }
+
+        if (this._digits.length == this.length-1)
+        {
+            this._digits ~= this.modulo10CheckSumDigit;
+        }
+        else if (this._digits.length == this.length)
+        {
+            if (this._digits[$-1] != this.modulo10CheckSumDigit)
+                throw new GTINException
+                ("Invalid checksum digit provided to the GTIN constructor.");
+        }
+        else
+        {
+            assert(0);
+        }
+    }
+
+    public
+    this (ulong number)
+    {
+        // If the number is too big to be expressed by this GTIN
+        if (number >= (10L^^(this.length+1L)))
+            throw new GTINException
+            ("Constructor for GTIN received too big of a number.");
+
+        this._digits.length = this.length;
+        int digitsIndex = this.length-1;
+        while (number > 0u)
+        {
+            this._digits[digitsIndex--] = (number % 10u);
+            number = ((number - (number % 10u)) / 10u);
+        }
+    }
+
+    @system
+    unittest
+    {
+        GTIN8 g08 = new GTIN8(1234_5678u);
+        assert(g08.toString() == "12345678");
+        GTIN12 g12 = new GTIN12(1234_5678_9012u);
+        assert(g12.toString() == "123456789012");
+        GTIN13 g13 = new GTIN13(1234_5678_9012_3u);
+        assert(g13.toString() == "1234567890123");
+        GTIN14 g14 = new GTIN14(1234_5678_9012_34u);
+        assert(g14.toString() == "12345678901234");
     }
 
     invariant
@@ -103,36 +211,70 @@ alias GTIN14 = GlobalTradeItemNumber14;
 public
 class GlobalTradeItemNumber14 : GlobalTradeItemNumber
 {
-    public
-    this (string digits)
+    public override @property
+    size_t length()
     {
-        if (digits.length > 14 || digits.length < 13)
-            throw new GTINException
-            ("Invalid number of digits in GTIN-14. Constructor will accept 13 or 14.");
+        return 14u;
+    }
 
-        foreach (digit; digits)
-        {
-            if (!digit.isDigit)
-                throw new GTINException
-                ("Invalid non-digit character provided to constructor.");
-            
-            this._digits ~= cast(ubyte) (digit - 0x30);
-        }
+    this(string digits)
+    {
+        super(digits);
+    }
 
-        if (this._digits.length == 13)
-        {
-            this._digits ~= this.modulo10CheckSumDigit;
-        }
-        else if (this._digits.length == 14)
-        {
-            if (this._digits[$-1] != this.modulo10CheckSumDigit)
-                throw new GTINException
-                ("Invalid checksum digit provided to the GTIN-14 constructor.");
-        }
-        else
-        {
-            assert(0);
-        }
+    this(ulong number)
+    {
+        super(number);
+    }
+
+    /**
+        Operator override for comparing one GTIN to another
+        using the double equals sign comparator ("==").
+    */
+    public override nothrow @trusted
+    bool opEquals(Object other)
+    {
+        GTIN14 that = cast(GTIN14) other;
+        return ((!(that is null)) && (this.digits == that.digits));
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN14 gtin1 = new GTIN14(1234_5678u);
+        GTIN14 gtin2 = new GTIN14(1234_5678u);
+        GTIN14 gtin3 = new GTIN14(1234_5679u);
+        assert(gtin1 == gtin2);
+        assert(gtin2 != gtin3);
+    }
+
+    /**
+        Operator override for comparing one GTIN to another
+        using the "<", "<=", ">", and ">=" comparators.
+    */
+    public override @trusted
+    int opCmp(Object other)
+    {
+        GTIN14 that = cast(GTIN14) other;
+        const ulong thisNumber = this.toNumber();
+        const ulong thatNumber = that.toNumber();
+        if (thisNumber == thatNumber) return 0;
+        return ((thisNumber / 10u) > (thatNumber / 10u) ? 1 : -1); 
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN14 gtin1 = new GTIN14(1234_5678u);
+        GTIN14 gtin2 = new GTIN14(1234_5678u);
+        GTIN14 gtin3 = new GTIN14(1234_5679u);
+        assert(!(gtin1 > gtin2));
+        assert(!(gtin1 < gtin2));
+        assert(gtin1 >= gtin2);
+        assert(gtin1 <= gtin2);
+        assert(gtin2 < gtin3);
     }
 
     /**
@@ -153,36 +295,70 @@ alias GTIN13 = GlobalTradeItemNumber13;
 public
 class GlobalTradeItemNumber13 : GlobalTradeItemNumber
 {
-    public
-    this (string digits)
+    public override @property
+    size_t length()
     {
-        if (digits.length > 13 || digits.length < 12)
-            throw new GTINException
-            ("Invalid number of digits in GTIN-13. Constructor will accept 12 or 13.");
+        return 13u;
+    }
 
-        foreach (digit; digits)
-        {
-            if (!digit.isDigit)
-                throw new GTINException
-                ("Invalid non-digit character provided to constructor.");
-            
-            this._digits ~= cast(ubyte) (digit - 0x30);
-        }
+    this(string digits)
+    {
+        super(digits);
+    }
 
-        if (this._digits.length == 12)
-        {
-            this._digits ~= this.modulo10CheckSumDigit;
-        }
-        else if (this._digits.length == 13)
-        {
-            if (this._digits[$-1] != this.modulo10CheckSumDigit)
-                throw new GTINException
-                ("Invalid checksum digit provided to the GTIN-13 constructor.");
-        }
-        else
-        {
-            assert(0);
-        }
+    this(ulong number)
+    {
+        super(number);
+    }
+
+        /**
+        Operator override for comparing one GTIN to another
+        using the double equals sign comparator ("==").
+    */
+    public override nothrow @trusted
+    bool opEquals(Object other)
+    {
+        GTIN13 that = cast(GTIN13) other;
+        return ((!(that is null)) && (this.digits == that.digits));
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN13 gtin1 = new GTIN13(1234_5678u);
+        GTIN13 gtin2 = new GTIN13(1234_5678u);
+        GTIN13 gtin3 = new GTIN13(1234_5679u);
+        assert(gtin1 == gtin2);
+        assert(gtin2 != gtin3);
+    }
+
+    /**
+        Operator override for comparing one GTIN to another
+        using the "<", "<=", ">", and ">=" comparators.
+    */
+    public override @trusted
+    int opCmp(Object other)
+    {
+        GTIN13 that = cast(GTIN13) other;
+        const ulong thisNumber = this.toNumber();
+        const ulong thatNumber = that.toNumber();
+        if (thisNumber == thatNumber) return 0;
+        return ((thisNumber / 10u) > (thatNumber / 10u) ? 1 : -1); 
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN13 gtin1 = new GTIN13(1234_5678u);
+        GTIN13 gtin2 = new GTIN13(1234_5678u);
+        GTIN13 gtin3 = new GTIN13(1234_5679u);
+        assert(!(gtin1 > gtin2));
+        assert(!(gtin1 < gtin2));
+        assert(gtin1 >= gtin2);
+        assert(gtin1 <= gtin2);
+        assert(gtin2 < gtin3);
     }
 }
 
@@ -190,86 +366,153 @@ class GlobalTradeItemNumber13 : GlobalTradeItemNumber
 unittest
 {
     GTIN13 g = new GTIN13("629104150021");
-    writeln("Calculated string: " ~ g.toString());
     assert(g.toString() == "6291041500213");
 }
 
-// alias GTIN12 = GlobalTradeItemNumber12;
-// /**
+alias GTIN12 = GlobalTradeItemNumber12;
+/**
 
-// */
-// public
-// class GlobalTradeItemNumber12 : GlobalTradeItemNumber
-// {
+*/
+public
+class GlobalTradeItemNumber12 : GlobalTradeItemNumber
+{
+    public override @property
+    size_t length()
+    {
+        return 12u;
+    }
 
-// }
+    this(string digits)
+    {
+        super(digits);
+    }
 
-// alias GTIN8 = GlobalTradeItemNumber8;
-// /**
+    this(ulong number)
+    {
+        super(number);
+    }
 
-// */
-// public
-// class GlobalTradeItemNumber8 : GlobalTradeItemNumber
-// {
+        /**
+        Operator override for comparing one GTIN to another
+        using the double equals sign comparator ("==").
+    */
+    public override nothrow @trusted
+    bool opEquals(Object other)
+    {
+        GTIN12 that = cast(GTIN12) other;
+        return ((!(that is null)) && (this.digits == that.digits));
+    }
 
-// }
+    ///
+    @system
+    unittest
+    {
+        GTIN12 gtin1 = new GTIN12(1234_5678u);
+        GTIN12 gtin2 = new GTIN12(1234_5678u);
+        GTIN12 gtin3 = new GTIN12(1234_5679u);
+        assert(gtin1 == gtin2);
+        assert(gtin2 != gtin3);
+    }
 
-// /**
-//     Returns the last digit of the number. Luhn checksum digits are usually
-//     appended to the number for which they are a checksum, meaning that, to
-//     obtain the checksum digit, one simply needs to take the last digit of
-//     the number. This function does that.
+    /**
+        Operator override for comparing one GTIN to another
+        using the "<", "<=", ">", and ">=" comparators.
+    */
+    public override @trusted
+    int opCmp(Object other)
+    {
+        GTIN12 that = cast(GTIN12) other;
+        const ulong thisNumber = this.toNumber();
+        const ulong thatNumber = that.toNumber();
+        if (thisNumber == thatNumber) return 0;
+        return ((thisNumber / 10u) > (thatNumber / 10u) ? 1 : -1); 
+    }
 
-//     Params:
-//         number = The number from which the last digit will be retrieved. The
-//             number itself will not be modified by reference.
-//     Returns: The last digit of the number.
-// */
-// // pragma(inline, true)
-// public @safe
-// ubyte lastDigitOf(T)(T number)
-// if (isIntegral!T && isUnsigned!T)
-// out (result)
-// {
-//     assert(result >= 0 && result <= 9);
-// }
-// body
-// {
-//     return cast(ubyte) (number % 10u);
-// }
+    ///
+    @system
+    unittest
+    {
+        GTIN12 gtin1 = new GTIN12(1234_5678u);
+        GTIN12 gtin2 = new GTIN12(1234_5678u);
+        GTIN12 gtin3 = new GTIN12(1234_5679u);
+        assert(!(gtin1 > gtin2));
+        assert(!(gtin1 < gtin2));
+        assert(gtin1 >= gtin2);
+        assert(gtin1 <= gtin2);
+        assert(gtin2 < gtin3);
+    }
+}
 
-// ///
-// @safe
-// unittest
-// {
-//     assert(lastDigitOf(79927398713u) == 3u);
-// }
+alias GTIN8 = GlobalTradeItemNumber8;
+/**
 
-// /**
-//     Returns the number, but with the last decimal digit removed. The number is
-//     not modified by reference, so the number passed in as the argument is not
-//     changed by this function; rather, the resulting number is returned.
+*/
+public
+class GlobalTradeItemNumber8 : GlobalTradeItemNumber
+{
+    public override @property
+    size_t length()
+    {
+        return 8u;
+    }
 
-//     Params:
-//         number = The number from which the last decimal digit will be removed.
-//     Returns: The number, but with the last decimal digit removed.
-// */
-// // pragma(inline, true)
-// public @safe
-// T removeLastDigitFrom(T)(T number)
-// if (isIntegral!T && isUnsigned!T)
-// out (result)
-// {
-//     assert(result <= number);
-// }
-// body
-// {
-//     return ((number - lastDigitOf(number)) / 10u);
-// }
+    this(string digits)
+    {
+        super(digits);
+    }
 
-// ///
-// @safe
-// unittest
-// {
-//     assert(lastDigitOf(79927398713u) == 3u);
-// }
+    this(ulong number)
+    {
+        super(number);
+    }
+
+        /**
+        Operator override for comparing one GTIN to another
+        using the double equals sign comparator ("==").
+    */
+    public override nothrow @trusted
+    bool opEquals(Object other)
+    {
+        GTIN8 that = cast(GTIN8) other;
+        return ((!(that is null)) && (this.digits == that.digits));
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN8 gtin1 = new GTIN8(1234_5678u);
+        GTIN8 gtin2 = new GTIN8(1234_5678u);
+        GTIN8 gtin3 = new GTIN8(1234_5679u);
+        assert(gtin1 == gtin2);
+        assert(gtin2 != gtin3);
+    }
+
+    /**
+        Operator override for comparing one GTIN to another
+        using the "<", "<=", ">", and ">=" comparators.
+    */
+    public override @trusted
+    int opCmp(Object other)
+    {
+        GTIN8 that = cast(GTIN8) other;
+        const ulong thisNumber = this.toNumber();
+        const ulong thatNumber = that.toNumber();
+        if (thisNumber == thatNumber) return 0;
+        return ((thisNumber / 10u) > (thatNumber / 10u) ? 1 : -1); 
+    }
+
+    ///
+    @system
+    unittest
+    {
+        GTIN8 gtin1 = new GTIN8(1234_5678u);
+        GTIN8 gtin2 = new GTIN8(1234_5678u);
+        GTIN8 gtin3 = new GTIN8(1234_5679u);
+        assert(!(gtin1 > gtin2));
+        assert(!(gtin1 < gtin2));
+        assert(gtin1 >= gtin2);
+        assert(gtin1 <= gtin2);
+        assert(gtin2 < gtin3);
+    }
+}
