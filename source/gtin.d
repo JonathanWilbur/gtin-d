@@ -16,7 +16,7 @@
             How to calculate a check digit manually)
         $(LINK2 https://www.gs1.org/check-digit-calculator,
             Check digit calculator)
-        $(LINK@ http://www.entmerch.org/programsinitiatives/packaging-labeling-and-edi/gtin-implementation-guide.pdf,
+        $(LINK2 http://www.entmerch.org/programsinitiatives/packaging-labeling-and-edi/gtin-implementation-guide.pdf,
             Global Trade Item Number (GTIN) Implementation Guide)
 */
 // TODO: Aliases for UPCs, EANs, etc.
