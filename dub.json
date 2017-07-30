@@ -1,0 +1,7 @@
+{
+	"name": "gtin",
+	"description": "Strong types for Global Trade Item Numbers",
+	"authors": [ "Jonathan M. Wilbur" ],
+	"license": "BSL-1.0",
+	"targetType": "library"
+}
